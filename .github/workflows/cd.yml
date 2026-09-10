@@ -34,6 +34,7 @@ jobs:
 
     outputs:
       version: ${{ steps.version.outputs.version }}
+      image: ${{ steps.image.outputs.name }}
 
     steps:
       - name: Checkout repository
@@ -74,3 +75,35 @@ jobs:
         run: |
           docker push ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
           docker push ${{ steps.image.outputs.name }}:latest
+
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+
+    steps:
+      - name: Deploy to staging
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            docker pull \
+              ${{ needs.build.outputs.image }}:${{ needs.build.outputs.version }}
+
+            docker stop mlops-api || true
+            docker rm mlops-api || true
+
+            docker run -d \
+              --name mlops-api \
+              --restart unless-stopped \
+              -p 5000:5000 \
+              ${{ needs.build.outputs.image }}:${{ needs.build.outputs.version }}
+
+      - name: Verify staging deployment
+        run: |
+          sleep 5
+          curl --fail \
+            http://${{ secrets.STAGING_HOST }}:5000/health
